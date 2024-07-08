@@ -1,0 +1,195 @@
+---
+title: "How Does a Bike-Share Navigate Speedy Success?"
+subtitle: "A case study on R"
+author: "Prabir Kumar Mitra"
+output: word_document
+---
+
+## 
+
+In this case study, we will perform a real-world data analysis tasks by incorporating publicly available data.
+
+### Scenario
+
+We consider a bike-share company in Chicago: Cyclistic. The director of marketing believes the company’s future success depends on maximizing the number of annual memberships. Therefore, our aim is to understand how casual riders and annual members use Cyclistic bikes differently. From these insights, we will design a new marketing strategy to convert casual riders into annual members. But first, Cyclistic executives must approve our recommendations, so they must be backed up with compelling data insights and professional data visualizations.
+
+-   Cyclistic's bike-sharing data can be found from the [public database](https://divvy-tripdata.s3.amazonaws.com/index.html). The data has been made available by Motivate International Inc. under this [license](https://www.divvybikes.com/data-license-agreement). We are only including the *Divvy_Trips_2020_Q1.zip* database in our project.
+
+## Importing and reading the database
+
+After installing and uploading the file in the current console, we install the following packagaes and call the associated libraries in the working session.
+
+```{r}
+library(tidyverse)
+library(readr)
+library(dplyr)
+Sys.setlocale("LC_TIME", "en_US.UTF-8")
+```
+
+Once these libraries are loaded in the session, we read the databse as follows:
+
+```{r}
+raw_tripdata <- read_csv("202104-divvy-tripdata.csv")
+
+summary(raw_tripdata)
+```
+
+In our session, we assign the name 'tripdata' to the database. We readily notice that the database has 13 columns and 337230 rows. Our next strategy is to clean the database that includes removing possible duplication, entries with missing values and impractical (mistakenly) entries. \## Tidying and orgnising the database
+
+```{r}
+tripdata <- na.omit(raw_tripdata)
+
+tripdata <- distinct(tripdata)
+
+summary(tripdata)
+```
+
+We readily notice that the number of rows has reduced to 298207 from 337230.
+
+We want to add three columns to the databse now:
+
+1.  duration of the trips in Hours
+2.  days of the week when those trips were made. For easy and better calculation, we will assign numerical values 1, 2, 3 ... to the weekdays as: Sunday -\> 1, Monday -\> 2, Tuesday -\> 3, etc.
+3.  length of the trips. A zero length implies that the trips started and ended at the same station.
+
+```{r}
+tripdata$duration <- as.numeric(difftime(tripdata$ended_at, tripdata$started_at,units="hours"))
+
+Tripday=weekdays(tripdata$started_at)
+
+dates=c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday")
+
+Tripday <- as.integer(factor(Tripday, levels = dates,ordered = TRUE))
+
+tripdata$tripday <- Tripday
+
+tripdata$length <- sqrt((tripdata$start_lat-tripdata$end_lat)^2+(tripdata$start_lng-tripdata$end_lng)^2)
+
+summary(tripdata)
+```
+
+Here, we notice that the minimum duration is negative which can not be accepted. Therefore, we will remove all the entries from the database where end time (*ended_at*) is noted to be before the start time (*started_at*).
+
+```{r}
+tripdata %>%  filter(duration < 0)
+
+tripdata <- tripdata %>% filter(duration > 0)
+
+summary(tripdata)
+```
+
+Following this, the number of rows in the database has further reduced to 298199. Let us now look at trip durations in detail, in relation with member status and bike type.
+
+```{r}
+bike_type <- table(tripdata$member_casual,tripdata$rideable_type)
+
+bike_type_data <- data.frame(member_type=c("casual","member"), classic_bike=bike_type[,1],docked_bike=bike_type[,2],electric_bike=bike_type[,3])
+
+bike_type_data <- rbind(bike_type_data, list("Total",sum(bike_type_data$classic_bike), sum(bike_type_data$docked_bike), sum(bike_type_data$electric_bike)))
+
+btt <- data.frame("member_type"=bike_type_data$member_type, "classic_bike"=bike_type_data$classic_bike, "docked_bike"=bike_type_data$docked_bike, "electric_bike"=bike_type_data$electric_bike)
+
+btt$total <- rowSums(btt[,2:4])
+
+bike_type <- btt
+
+bike_type
+```
+
+It is clear from the above table that the number of annual members is \~1.5 times the number of casual members. Among the different types of bikes, classic bikes are much more in use than other types. However, very interestingly, the docked type bikes are only used by casual members. We look at the average duration of ridership in the next table.
+
+```{r}
+tripdata %>%
+  group_by(member_casual) %>%
+  summarise(avg_duration=mean(duration))
+
+tripdata %>%
+  group_by(member_casual,rideable_type) %>%
+  summarise(avg_duration=mean(duration))
+```
+
+As we find, despite the members being much more in number than the casual riders, the average duration of rides is almost 3 times than that of the members. Further, the ridership with docked bike is extremely high compared to other types of bikes. Here we remeber that docked type bikes are used by casual members only.
+
+```{r}
+d_bike <- tripdata %>%
+  filter(rideable_type == "docked_bike") %>%
+  group_by(tripday) %>%
+  summarise(avg_duration=mean(duration))
+
+d_bike
+```
+
+Here we immediately notice that, while average ridership in docked bikes are similar in most of the weekdays, except for Thursday and Friday. On Thursday, the ridership seems to be lowest and on Friday the ridership seems to be the most. On both of these two days, the ridership average is extremely low or high compared to other days. Therefore, we look into details of these two days ridership on docked bikes.
+
+```{r}
+tripdata %>%
+  filter(rideable_type == "docked_bike" & tripday == 5) %>%
+  group_by(start_station_name,end_station_name) %>%
+  summarise(avg_duration=mean(duration)) %>%
+
+    arrange(desc(avg_duration))
+```
+
+Clearly, there is one exceptional entry of ridership of 34.5 hours on Thursday, whereas all the other entries are of less than 25 hours. This particular ride initiated and terminated both at the "Chicago State University (CSU)". In the following, we look at the specific entries from trips: CSU -\> CSU on Thursday as well as on each weekdays.
+
+```{r}
+csu <- "Chicago State University"
+tripdata %>%
+  filter(rideable_type == "docked_bike" & start_station_name == csu & end_station_name == csu & tripday == 5)
+
+tripdata %>%
+  filter(rideable_type == "docked_bike" & start_station_name == csu & end_station_name == csu) %>%
+  group_by(tripday) %>%
+  summarise(duration) %>%
+  arrange(desc(duration))
+```
+
+Strangely, while the total ridership from CSU to CSU on other weekdays are only a few minutes to less than two hours, one particular entry with the *ride_id*: 5D0B0CCDB4238065 stands out as it had a duration of more than 60 hours.
+
+Next, we look into details of the docked bike rides on Fridays.
+
+```{r}
+tripdata %>%
+  filter(rideable_type == "docked_bike" & tripday == 6) %>%
+  group_by(ride_id,started_at,ended_at) %>%
+  summarise(duration) %>%
+  arrange(desc(duration))
+```
+
+Here, one particular entry with the *ride_id*: E84DF812305C9C9F stands out in view of its unusually long duration. After excluding this entry from the calculation, the average ridership on Friday reduces to 1.83 hours which is comparable to the other weekdays except Thursday.
+
+```{r}
+f_tripdata <- tripdata %>%
+  filter(rideable_type == "docked_bike" & tripday == 6)
+
+f_tripdata %>%
+  filter(duration < 796.) %>%
+  summarise(mean(duration))
+
+```
+
+## Observations
+
+In this section, we will summarise our key observations from the analysis. They are listed below:
+
+1.  Number of annual members are \~1.5 times than that of casual riders. However, casual riders use Cyclistic's bikes almost 3 times than that of annual riders.
+
+2.  Cyclistic offers three type of bikes: classical, docked and electric. While classical and electric bikes are used by both member and casual type riders, the docked bike seems to be used by only the casual riders.
+
+3.  Docked bikes, although least in number compared to other two types of bikes, are used for the longest rides on average. Remebering that this type of bikes are only used by casual riders, an assessment can be made that casual riders hire docked bikes for spending leisure time i.e., for short trips over the weekends etc. This argument is further supported by the fact that the longest ridership on average initiated on Fridays.
+
+4.  A couple of entries are worth re-checking, which could not be possible in this project. These are:
+
+-   *ride_id*: 5D0B0CCDB4238065 (CSU -\> CSU, duration: \~69 Hours)
+-   *ride_id*: E84DF812305C9C9F (Duration: 796 Hours)
+
+## Conclusions and recommendations
+
+It should be remembered here that the dataset does not provide the membership amount as well as casual ride prices. Without these values, it becomes difficult to explain the disparity between the number of membership and ridership. However, from the analysis, we can make one recommendation with certainty.
+Considering, docked bikes are mostly used for leisure activities, Cyclistic can provide lucrative offers to sell memberships for the leisure riders. A few recommendations include:
+
+• A limited number of free rides can be provided upon completing a certain number of leisure rides for the annual members in order to inspire them for longer bike trips.
+
+• Cyclistic can add live tracking, intimation of fun activities, locations of convenient stores, restrooms etc. on their app which will make leisure rides more convenient. If these features are only made available with a membership then the number of membership can be significantly increased.
+
+• Some discount on the membership can be provided for rides who use the bikes to commute to universities or other public services.
